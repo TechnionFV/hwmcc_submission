@@ -503,16 +503,17 @@ def report_winner(model, model_pp, code, engine, opt, mapping):
         # assert (not opt.check_witness or check_certificate(model, cert_name, opt.verbose))
 
     if opt.verbose: print('[pavy] Witness end')
-    print('Winner: ', wcfg.name)
-    print('Result:  ' + ('SAFE' if code == 0 else 'UNSAFE'))
-    print('Witness: ' + (cert_name if code == 0 else opt.cex))
+    # print('Winner: ', wcfg.name)
+#    print('Result:  ' + ('SAFE' if code == 0 else 'UNSAFE'))
+    # print('Witness: ' + (cert_name if code == 0 else opt.cex))
+    print('UNSAT' if code == 0 else 'SAT')
 
 def run(workdir, fname, profs, opt):
     '''Run everything and wait for an answer'''
 
     if len(profs) == 0: return
 
-    print("[pavy] starting run with fname={f}".format(f=fname))
+    if opt.verbose: print("[pavy] starting run with fname={f}".format(f=fname))
     sys.stdout.flush()
 
     if opt.verbose: print("[pavy] running pp")
@@ -544,7 +545,7 @@ def run(workdir, fname, profs, opt):
     running.extend([runProc(pp_name, engines[e], verbose=opt.verbose, dedicated=dedicated) for e in engines])
 
     pids = [p.pid for p in running]
-    print(f"[pavy] running: {pids}")
+    if opt.verbose: print(f"[pavy] running: {pids}")
 
     pid = -1
     exit_code = 2
