@@ -1,4 +1,4 @@
-# hwmcc24_submission
+# hwmcc_submission
 
 Our submission for HWMCC25
 
