@@ -212,8 +212,8 @@ def profiles():
                             '--cadical_itp_minimize=0',
                             '--cadical_itp_minimizer_inprocessing=1']))
 
-    reg_profile(RfvConfig('RFVEV', [getRfv(), '--extension-variables', 'on', '--lic', 'on']))
-    reg_profile(RfvConfig('RFV', [getRfv(), '--extension-variables', 'off', '--lic', 'on']))
+    reg_profile(RfvConfig('RFVEV', [getRfv(), '--er', 'on', '--lic', 'on']))
+    reg_profile(RfvConfig('RFV', [getRfv(), '--er', 'off', '--lic', 'on']))
     return profs
 
 def list_profiles(option, opt_str, value, parser):
