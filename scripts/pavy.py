@@ -497,7 +497,7 @@ def report_winner(model, model_pp, code, engine, opt, mapping):
                         out_cex=of(opt.cex))
         assert (not opt.check_witness or check_cex(model, opt.cex, opt.verbose))
     elif code == 0:
-        cert_name = add_cert_ext(cert_name, wcfg.binary_certificate())
+        # cert_name = add_cert_ext(cert_name, wcfg.binary_certificate())
         shutil.copy2(engine['cert'], cert_name)
         concat_mapping(cert_name, mapping, wcfg.binary_certificate(), opt.verbose)
         # assert (not opt.check_witness or check_certificate(model, cert_name, opt.verbose))
@@ -506,7 +506,7 @@ def report_winner(model, model_pp, code, engine, opt, mapping):
     # print('Winner: ', wcfg.name)
 #    print('Result:  ' + ('SAFE' if code == 0 else 'UNSAFE'))
     # print('Witness: ' + (cert_name if code == 0 else opt.cex))
-    print('UNSAT' if code == 0 else 'SAT')
+    print('unsat' if code == 0 else 'sat')
 
 def run(workdir, fname, profs, opt):
     '''Run everything and wait for an answer'''
