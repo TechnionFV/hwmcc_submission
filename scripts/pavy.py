@@ -396,10 +396,10 @@ def getRfv():
         raise IOError('Cannot find rfv')
     return f
 
-def getUninitializedMapper():
-    f = which('unintitialized_mapping')
+def getCertificateProcessor():
+    f = which('process_certificate')
     if f is None:
-        raise IOError('Cannot find unintitialized_mapping')
+        raise IOError('Cannot find process_certificate')
     return f
 
 def getCertChecker():
@@ -416,36 +416,12 @@ def execute (cmd):
         return False, e.stdout.decode()
         # pass
 
-def create_uninitialized_mapping(workdir, fname, verbose):
-    mapping_fname = os.path.join(workdir, os.path.basename(fname) + '.map')
-    cmd = f"{getUninitializedMapper()} {fname} {mapping_fname}"
-    if verbose: print('[pavy] creating uninitialized mapping with', cmd)
+def refine_certificate(workdir, model, cert):
+    # We expect cert to be with .aig extension
+    refined_cert = os.path.join(workdir, f"refined_{cert}")
+    cmd = f"{getCertificateProcessor()} {model} {cert} {refined_cert}"
     execute(cmd)
-    return mapping_fname
-
-def concat_mapping(fname, mapping_fname, binary, verbose):
-    if verbose: print('[pavy] concatenating mapping to certificate')
-    if binary:
-        with open(fname, 'rb') as f:
-            content = f.read()
-            lines = content.split(b'\n')
-            with open(fname, 'wb') as f:
-                for line in lines[:-4]:
-                    f.write(line + b'\n')
-                with open(mapping_fname, 'rb') as m:
-                    f.write(m.read())
-                for line in lines[-4:]:
-                    f.write(line + b'\n')
-    else:
-        with open(fname, 'r') as f:
-            content = f.readlines()
-            with open(fname, 'w') as f:
-                for line in content[:-4]:
-                    f.write(line)
-                with open(mapping_fname, 'r') as m:
-                    f.write(m.read())
-                for line in content[-4:]:
-                    f.write(line)
+    shutil.copy2(refined_cert, cert)
 
 def check_certificate(model, cert, verbose):
     cmd = f"{getCertChecker()} {model} {cert}"
@@ -471,7 +447,7 @@ def check_cex(model, cex, verbose):
         return True
     assert (False and "Unexpected output")
 
-def report_winner(model, model_pp, code, engine, opt, mapping):
+def report_winner(model, model_pp, code, engine, opt, workdir):
 
     def of(n):
         if n == '-': return sys.stdout
@@ -497,15 +473,15 @@ def report_winner(model, model_pp, code, engine, opt, mapping):
                         out_cex=of(opt.cex))
         assert (not opt.check_witness or check_cex(model, opt.cex, opt.verbose))
     elif code == 0:
-        # cert_name = add_cert_ext(cert_name, wcfg.binary_certificate())
         shutil.copy2(engine['cert'], cert_name)
-        concat_mapping(cert_name, mapping, wcfg.binary_certificate(), opt.verbose)
+        refine_certificate(workdir, model, cert_name)
         # assert (not opt.check_witness or check_certificate(model, cert_name, opt.verbose))
 
-    if opt.verbose: print('[pavy] Witness end')
-    # print('Winner: ', wcfg.name)
-#    print('Result:  ' + ('SAFE' if code == 0 else 'UNSAFE'))
-    # print('Witness: ' + (cert_name if code == 0 else opt.cex))
+    if opt.verbose:
+        print('[pavy] Witness end')
+        print('[pavy] Winner: ', wcfg.name)
+        print('[pavy] Result:  ' + ('SAFE' if code == 0 else 'UNSAFE'))
+        print('[pavy] Witness: ' + (cert_name if code == 0 else opt.cex))
     print('unsat' if code == 0 else 'sat')
 
 def run(workdir, fname, profs, opt):
@@ -539,8 +515,6 @@ def run(workdir, fname, profs, opt):
             engines[x]['core'] = available_cores[0]
             available_cores.remove(available_cores[0])
 
-    uninitialized_mapping = create_uninitialized_mapping(workdir, fname, opt.verbose)
-
     global running
     running.extend([runProc(pp_name, engines[e], verbose=opt.verbose, dedicated=dedicated) for e in engines])
 
@@ -571,7 +545,7 @@ def run(workdir, fname, profs, opt):
         # exit codes: 0 = SAFE, 1 = UNSAFE, 2 = UNKNOWN, 3 = validation error
         if sig == 0 and (exit_code == 0 or exit_code == 1):
             winner = next((n for n, e in engines.items() if e['pid'] == pid), None)
-            report_winner(model=fname, model_pp=pp_name, code=exit_code, engine=engines[winner], opt=opt, mapping=uninitialized_mapping)
+            report_winner(model=fname, model_pp=pp_name, code=exit_code, engine=engines[winner], opt=opt, workdir=workdir)
             for p in pids:
                 try:
                     if opt.verbose: print("[pavy] trying to kill ", p)
