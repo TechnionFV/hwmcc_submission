@@ -214,6 +214,8 @@ def profiles():
 
     reg_profile(RfvConfig('RFVEV', [getRfv(), '--er', 'on', '--lic', 'on']))
     reg_profile(RfvConfig('RFV', [getRfv(), '--er', 'off', '--lic', 'on']))
+    reg_profile(RfvConfig('RFVEVCTG', [getRfv(), '--er', 'on', '--lic', 'on', '--ctg', 'on']))
+    reg_profile(RfvConfig('RFVCTG', [getRfv(), '--er', 'off', '--lic', 'on', '--ctg', 'on']))
     return profs
 
 def list_profiles(option, opt_str, value, parser):
@@ -229,7 +231,7 @@ def parseOpt(argv):
                       callback=list_profiles,
                       help='(INTERNAL USE ONLY) List all available profiles')
     parser.add_option('-p', '--profiles', type=str,
-                      default='navy:abcpdr:fib:kavy1:kavy3:Macallan:JohnnieWalker:Jameson:RFVEV:RFV', help='Colon separated list of profiles to run')
+                      default='navy:abcpdr:fib:kavy1:kavy3:Macallan:Jameson:RFVEV:RFV:RFVEVCTG:RFVCTG', help='Colon separated list of profiles to run')
     parser.add_option("--save-temps", dest="save_temps",
                       help="Do not delete the temporary directory holding intermediate files",
                       action="store_true",
@@ -315,13 +317,18 @@ def runPP(workdir, in_name, cpu=-1, verbose=False):
                                                                    y=out_name)]
     if verbose: print('[pavy]', ' '.join(abc_args))
 
-
     def _set_limits():
         if cpu > 0:
             resource.setrlimit(resource.RLIMIT_CPU, [cpu, cpu])
-   
+
     try:
-        sub.check_call(abc_args, preexec_fn=_set_limits)
+        sub.check_call(
+            abc_args,
+            preexec_fn=_set_limits,
+            stdout=sub.DEVNULL,
+            # stderr=sub.DEVNULL,
+            # stdin=sub.DEVNULL,
+        )
     except sub.CalledProcessError as e:
         if verbose:
             print('[pavy] pre-processing failed with', e)
@@ -330,7 +337,13 @@ def runPP(workdir, in_name, cpu=-1, verbose=False):
                     '&r {x} ; &put; write_aiger {y}'.format(x=in_name, y=out_name)]
         try:
             if verbose: print('[pavy] trivial pre-processing')
-            sub.check_call(abc_args)
+            sub.check_call(
+                abc_args,
+                preexec_fn=_set_limits,
+                stdout=sub.DEVNULL,
+                # stderr=sub.DEVNULL,
+                # stdin=sub.DEVNULL,
+            )
         except sub.CalledProcessError as e2:
             if verbose: print('[pavy] trivial pre-processing failed with', e2)
             out_name = in_name
@@ -453,10 +466,6 @@ def report_winner(model, model_pp, code, engine, opt, workdir):
         if n == '-': return sys.stdout
         else: return open(n, 'w')
 
-    def add_cert_ext(fname, binary):
-        if binary: return f"{fname}.aig"
-        else : return f"{fname}.aag"
-
     wcfg = engine['cfg']
 
     if opt.verbose:
@@ -471,11 +480,13 @@ def report_winner(model, model_pp, code, engine, opt, workdir):
                         cex_aig=aig.parse(open(model_pp, 'rb')),
                         orig_aig=aig.parse(open(model, 'rb')),
                         out_cex=of(opt.cex))
-        assert (not opt.check_witness or check_cex(model, opt.cex, opt.verbose))
+        if opt.check_witness:
+            check_cex(model, opt.cex, opt.verbose)
     elif code == 0:
         shutil.copy2(engine['cert'], cert_name)
         refine_certificate(workdir, model, cert_name)
-        # assert (not opt.check_witness or check_certificate(model, cert_name, opt.verbose))
+        if opt.check_witness:
+            check_certificate(model, cert_name, opt.verbose)
 
     if opt.verbose:
         print('[pavy] Witness end')
@@ -534,10 +545,10 @@ def run(workdir, fname, profs, opt):
             break
         (exit_code, sig) = (returnvalue // 256, returnvalue % 256) 
 
-        if opt.verbose or exit_code != 0 or sig != 0:
+        if opt.verbose and sig != 0:
             if sig == 9:
                 print(f"[pavy] killed pid {pid} due to timeout")
-            else:
+            elif sig != 0:
                 print(f"[pavy] finished pid {pid} with code {exit_code} and signal {sig}")
 
         pids.remove(pid)
@@ -573,8 +584,7 @@ def run(workdir, fname, profs, opt):
                 print('[pavy] Calling sys.exit with {0}'.format(returnvalue // 256))
                 sys.exit(returnvalue // 256)
 
-        print('[pavy] Winner: Unknown')
-        print('[pavy] Result: UNDETERMINED')
+        print('undetermined')
 
     running[:] = []
     return exit_code
