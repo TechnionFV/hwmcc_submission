@@ -219,6 +219,7 @@ def profiles():
                             '--cadical_itp_minimizer_inprocessing=1']))
 
     reg_profile(RfvConfig('RFVEV', [getRfv(), '--er', 'on', '--lic', 'on']))
+    reg_profile(RfvConfig('RFVEV_NO_FP', [getRfv(), '--er', 'on', '--lic', 'on', '--er-fp', 'off']))
     reg_profile(RfvConfig('RFV', [getRfv(), '--er', 'off', '--lic', 'on']))
     reg_profile(RfvConfig('RFVEVCTG', [getRfv(), '--er', 'on', '--lic', 'on', '--ctg', 'on']))
     reg_profile(RfvConfig('RFVCTG', [getRfv(), '--er', 'off', '--lic', 'on', '--ctg', 'on']))
@@ -237,7 +238,7 @@ def parseOpt(argv):
                       callback=list_profiles,
                       help='(INTERNAL USE ONLY) List all available profiles')
     parser.add_option('-p', '--profiles', type=str,
-                      default='navy:abcpdr:fib:kavy1:kavy3:Macallan:Jameson:RFVEV:RFV:RFVEVCTG:RFVCTG', help='Colon separated list of profiles to run')
+                      default='navy:abcpdr:fib:kavy1:kavy3:Macallan:Jameson:RFVEV:RFV:RFVEVCTG:RFVCTG:RFVEV_NO_FP', help='Colon separated list of profiles to run')
     parser.add_option("--save-temps", dest="save_temps",
                       help="Do not delete the temporary directory holding intermediate files",
                       action="store_true",
@@ -335,7 +336,7 @@ def runAVYPreprocessing(workdir, in_name, cpu=-1, verbose=False):
         )
         output = result.stdout.decode()
         if 'Warning: The network has no constraints.' in output:
-            network_has_constraints = True
+            network_has_constraints = False
             if verbose:
                 print('[pavy] The network has no constraints.')
     except sub.CalledProcessError as e:
@@ -577,19 +578,22 @@ def run(workdir, fname, profs, opt):
     for x in profs:
         cfg = p[x]
         assert cfg is not None, "Unknown profile " + x
-        if not network_has_constraints or cfg.compatible_with_constraints(): continue
-        engines[x] = {'cfg': cfg, 'stdout': os.path.join(workdir, cfg.name + '_{0}.stdout'.format(x)),
-                   'stderr': os.path.join(workdir, cfg.name + '_{0}.stderr'.format(x)),
-                   'cex': os.path.join(workdir, cfg.name + '_{0}.cex'.format(x)),
-                   'cert': os.path.join(workdir, cfg.name + '_{0}.cert'.format(x)),
-                   'model': avy_pp_name if cfg.avy_based() else rfv_pp_name}
-        if opt.verbose: cfg.verbose(1)
-        cfg.set_witness_output(engines[x]['cex'], engines[x]['cert'])
-        cfg.set_time_limit(opt.cpu)
-        cfg.set_memory_limit(opt.mem)
-        if dedicated:
-            engines[x]['core'] = available_cores[0]
-            available_cores.remove(available_cores[0])
+        if cfg.name == 'RFVEV_NO_FP' and not network_has_constraints:
+            if opt.verbose: print(f"[pavy] skipping {cfg.name} since the network has no constraints")
+            continue
+        if not network_has_constraints or cfg.compatible_with_constraints():
+            engines[x] = {'cfg': cfg, 'stdout': os.path.join(workdir, cfg.name + '_{0}.stdout'.format(x)),
+                    'stderr': os.path.join(workdir, cfg.name + '_{0}.stderr'.format(x)),
+                    'cex': os.path.join(workdir, cfg.name + '_{0}.cex'.format(x)),
+                    'cert': os.path.join(workdir, cfg.name + '_{0}.cert'.format(x)),
+                    'model': avy_pp_name if cfg.avy_based() else rfv_pp_name}
+            if opt.verbose: cfg.verbose(1)
+            cfg.set_witness_output(engines[x]['cex'], engines[x]['cert'])
+            cfg.set_time_limit(opt.cpu)
+            cfg.set_memory_limit(opt.mem)
+            if dedicated:
+                engines[x]['core'] = available_cores[0]
+                available_cores.remove(available_cores[0])
 
     global running
     running.extend([runProc(engines[e], verbose=opt.verbose, dedicated=dedicated) for e in engines])
