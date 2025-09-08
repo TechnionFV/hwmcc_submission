@@ -54,7 +54,9 @@ class SolverCfg(object):
     def __str__(self):
         return '[' + self.name + '] ' + ' '.join(self.cmd)
 
-    def binary_certificate(self): return True
+    def avy_based(self): return True
+
+    def compatible_with_constraints(self): return False
 
 class RfvConfig(SolverCfg):
     def __init__(self, name, cmd, cpu=-1, mem=-1):
@@ -78,7 +80,9 @@ class RfvConfig(SolverCfg):
     def __str__(self):
         return '[' + self.name + '] ' + ' '.join(self.cmd)
 
-    def binary_certificate(self): return True
+    def avy_based(self): return False
+
+    def compatible_with_constraints(self): return True
 
 class AvyBmcConfig(SolverCfg):
     def __init__(self, name, cmd, cpu=-1, mem=-1):
@@ -98,7 +102,9 @@ class AvyBmcConfig(SolverCfg):
     def __str__(self):
         return '[' + self.name + '] ' + ' '.join(self.cmd)
 
-    def binary_certificate(self): return True # Or throw an error?
+    def avy_based(self): return True
+
+    def compatible_with_constraints(self): return True
 
 def profiles():
     
@@ -298,22 +304,72 @@ def which(program):
                 return exe_file
     return None
 
-def runPP(workdir, in_name, cpu=-1, verbose=False):
+def runAVYPreprocessing(workdir, in_name, cpu=-1, verbose=False):
     '''pre-processing '''
     if verbose: print("[pavy] in_name = ", in_name)
 
     out_name = os.path.basename(in_name)
     out_name, ext = os.path.splitext(out_name)
-    out_name = os.path.join(workdir, out_name + '_pp' + ext)
-    
-    # abc_args = [getAbc(),
-    #             '-c',
-    #             '&r {x} ; &lcorr ; &scorr; &fraig ; &put; write_aiger {y}'.format(x=in_name,
-    #                                                                y=out_name)]
+    out_name = os.path.join(workdir, out_name + '_avy_pp' + ext)
+
     abc_exec_cmd = '-c' if verbose else '-q'
     abc_args = [getAbc(),
                 abc_exec_cmd,
                 '&r {x}; &put; fold; &get; &dc2; &fraig -C 1000; &put; write_aiger {y}'.format(x=in_name,
+                                                                   y=out_name)]
+    if verbose: print('[pavy]', ' '.join(abc_args))
+
+    def _set_limits():
+        if cpu > 0:
+            resource.setrlimit(resource.RLIMIT_CPU, [cpu, cpu])
+
+    network_has_constraints = True
+
+    try:
+        result = sub.run(
+            abc_args,
+            preexec_fn=_set_limits,
+            stdout=sub.PIPE,
+            stderr=sub.PIPE,
+            # stdin=sub.DEVNULL,
+        )
+        output = result.stdout.decode()
+        if 'Warning: The network has no constraints.' in output:
+            network_has_constraints = True
+            if verbose:
+                print('[pavy] The network has no constraints.')
+    except sub.CalledProcessError as e:
+        if verbose:
+            print('[pavy] pre-processing failed with', e)
+
+        abc_args = [getAbc(), abc_exec_cmd,
+                    '&r {x} ; &put; write_aiger {y}'.format(x=in_name, y=out_name)]
+        try:
+            if verbose: print('[pavy] trivial pre-processing')
+            sub.check_call(
+                abc_args,
+                preexec_fn=_set_limits,
+                stdout=sub.DEVNULL,
+                # stderr=sub.DEVNULL,
+                # stdin=sub.DEVNULL,
+            )
+        except sub.CalledProcessError as e2:
+            if verbose: print('[pavy] trivial pre-processing failed with', e2)
+            out_name = in_name
+    return out_name, network_has_constraints
+
+def runRFVPreprocessing(workdir, in_name, cpu=-1, verbose=False):
+    '''pre-processing '''
+    if verbose: print("[pavy] in_name = ", in_name)
+
+    out_name = os.path.basename(in_name)
+    out_name, ext = os.path.splitext(out_name)
+    out_name = os.path.join(workdir, out_name + '_rfv_pp' + ext)
+
+    abc_exec_cmd = '-c' if verbose else '-q'
+    abc_args = [getAbc(),
+                abc_exec_cmd,
+                'read {x}; dc2; fraig -C 1000; write_aiger {y}'.format(x=in_name,
                                                                    y=out_name)]
     if verbose: print('[pavy]', ' '.join(abc_args))
 
@@ -349,7 +405,7 @@ def runPP(workdir, in_name, cpu=-1, verbose=False):
             out_name = in_name
     return out_name
 
-def runProc(fname, engine, verbose=False, dedicated=False):
+def runProc(engine, verbose=False, dedicated=False):
     cfg = engine['cfg']
     args = cfg.cmd
     cpu = cfg.cpu
@@ -357,7 +413,7 @@ def runProc(fname, engine, verbose=False, dedicated=False):
     stdout = engine['stdout']
     stderr = engine['stderr']
 
-    args += [fname]
+    args += [engine['model']]
 
     if dedicated:
         core = engine['core']
@@ -460,7 +516,7 @@ def check_cex(model, cex, verbose):
         return True
     assert (False and "Unexpected output")
 
-def report_winner(model, model_pp, code, engine, opt, workdir):
+def report_winner(model, code, engine, opt, workdir):
 
     def of(n):
         if n == '-': return sys.stdout
@@ -477,7 +533,7 @@ def report_winner(model, model_pp, code, engine, opt, workdir):
 
     if code == 1:
         aig.adjust_cex(in_cex=open(engine['cex']),
-                        cex_aig=aig.parse(open(model_pp, 'rb')),
+                        cex_aig=aig.parse(open(engine['model'], 'rb')),
                         orig_aig=aig.parse(open(model, 'rb')),
                         out_cex=of(opt.cex))
         if opt.check_witness:
@@ -504,8 +560,14 @@ def run(workdir, fname, profs, opt):
     sys.stdout.flush()
 
     if opt.verbose: print("[pavy] running pp")
-    pp_name = runPP(workdir, fname, cpu=opt.pp_cpu, verbose=opt.verbose)
-    if opt.verbose: print("[pavy] finished pp, output={f}".format(f=pp_name))
+
+    avy_pp_name, network_has_constraints = runAVYPreprocessing(workdir, fname, cpu=opt.pp_cpu, verbose=opt.verbose)
+    rfv_pp_name = runRFVPreprocessing(workdir, fname, cpu=opt.pp_cpu, verbose=opt.verbose)
+
+    if opt.verbose:
+        print("[pavy] finished avy pp, output={f}".format(f=avy_pp_name))
+        print("[pavy] finished rfv pp, output={f}".format(f=rfv_pp_name))
+        sys.stdout.flush()
 
     p = profiles()
     available_cores = list(os.sched_getaffinity(0))
@@ -514,10 +576,13 @@ def run(workdir, fname, profs, opt):
     engines = {}
     for x in profs:
         cfg = p[x]
-        engines[x] = {'cfg': cfg, 'stdout': os.path.join(workdir, cfg.name + '_avy{0}.stdout'.format(x)),
-                   'stderr': os.path.join(workdir, cfg.name + '_avy{0}.stderr'.format(x)),
-                   'cex': os.path.join(workdir, cfg.name + '_avy{0}.cex'.format(x)),
-                   'cert': os.path.join(workdir, cfg.name + '_avy{0}.cert'.format(x))}
+        assert cfg is not None, "Unknown profile " + x
+        if not network_has_constraints or cfg.compatible_with_constraints(): continue
+        engines[x] = {'cfg': cfg, 'stdout': os.path.join(workdir, cfg.name + '_{0}.stdout'.format(x)),
+                   'stderr': os.path.join(workdir, cfg.name + '_{0}.stderr'.format(x)),
+                   'cex': os.path.join(workdir, cfg.name + '_{0}.cex'.format(x)),
+                   'cert': os.path.join(workdir, cfg.name + '_{0}.cert'.format(x)),
+                   'model': avy_pp_name if cfg.avy_based() else rfv_pp_name}
         if opt.verbose: cfg.verbose(1)
         cfg.set_witness_output(engines[x]['cex'], engines[x]['cert'])
         cfg.set_time_limit(opt.cpu)
@@ -527,7 +592,7 @@ def run(workdir, fname, profs, opt):
             available_cores.remove(available_cores[0])
 
     global running
-    running.extend([runProc(pp_name, engines[e], verbose=opt.verbose, dedicated=dedicated) for e in engines])
+    running.extend([runProc(engines[e], verbose=opt.verbose, dedicated=dedicated) for e in engines])
 
     pids = [p.pid for p in running]
     if opt.verbose: print(f"[pavy] running: {pids}")
@@ -556,7 +621,7 @@ def run(workdir, fname, profs, opt):
         # exit codes: 0 = SAFE, 1 = UNSAFE, 2 = UNKNOWN, 3 = validation error
         if sig == 0 and (exit_code == 0 or exit_code == 1):
             winner = next((n for n, e in engines.items() if e['pid'] == pid), None)
-            report_winner(model=fname, model_pp=pp_name, code=exit_code, engine=engines[winner], opt=opt, workdir=workdir)
+            report_winner(model=fname, code=exit_code, engine=engines[winner], opt=opt, workdir=workdir)
             for p in pids:
                 try:
                     if opt.verbose: print("[pavy] trying to kill ", p)
