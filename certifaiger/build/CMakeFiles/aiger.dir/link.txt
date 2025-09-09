@@ -1,2 +1,0 @@
-"/usr/bin/gcc-ar-11" cr libaiger.a CMakeFiles/aiger.dir/dependencies/aiger/aiger.c.o
-"/usr/bin/gcc-ranlib-11" libaiger.a
