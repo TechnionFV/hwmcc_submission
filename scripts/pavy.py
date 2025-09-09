@@ -488,7 +488,8 @@ def execute (cmd):
 
 def refine_certificate(workdir, model, cert):
     # We expect cert to be with .aig extension
-    refined_cert = os.path.join(workdir, f"refined_{cert}")
+    assert(cert.endswith('.aig'))
+    refined_cert = os.path.join(workdir, f"{cert}.refined.aig")
     cmd = f"{getCertificateProcessor()} {model} {cert} {refined_cert}"
     execute(cmd)
     shutil.copy2(refined_cert, cert)
@@ -530,8 +531,6 @@ def report_winner(model, code, engine, opt, workdir):
         cat(open(engine['stdout']), sys.stderr)
         print('[pavy] Witness begin')
 
-    cert_name = opt.certificate
-
     if code == 1:
         aig.adjust_cex(in_cex=open(engine['cex']),
                         cex_aig=aig.parse(open(engine['model'], 'rb')),
@@ -540,16 +539,19 @@ def report_winner(model, code, engine, opt, workdir):
         if opt.check_witness:
             check_cex(model, opt.cex, opt.verbose)
     elif code == 0:
-        shutil.copy2(engine['cert'], cert_name)
-        refine_certificate(workdir, model, cert_name)
+        winner_cert = engine['cert']
+        if engine['cfg'].avy_based():
+            if opt.verbose: print("[pavy] Refining certificate..")
+            refine_certificate(workdir, model, winner_cert)
+        shutil.copy2(winner_cert, opt.certificate)
         if opt.check_witness:
-            check_certificate(model, cert_name, opt.verbose)
+            check_certificate(model, opt.certificate, opt.verbose)
 
     if opt.verbose:
         print('[pavy] Witness end')
         print('[pavy] Winner: ', wcfg.name)
         print('[pavy] Result:  ' + ('SAFE' if code == 0 else 'UNSAFE'))
-        print('[pavy] Witness: ' + (cert_name if code == 0 else opt.cex))
+        print('[pavy] Witness: ' + (opt.certificate if code == 0 else opt.cex))
     print('unsat' if code == 0 else 'sat')
 
 def run(workdir, fname, profs, opt):
@@ -585,7 +587,7 @@ def run(workdir, fname, profs, opt):
             engines[x] = {'cfg': cfg, 'stdout': os.path.join(workdir, cfg.name + '_{0}.stdout'.format(x)),
                     'stderr': os.path.join(workdir, cfg.name + '_{0}.stderr'.format(x)),
                     'cex': os.path.join(workdir, cfg.name + '_{0}.cex'.format(x)),
-                    'cert': os.path.join(workdir, cfg.name + '_{0}.cert'.format(x)),
+                    'cert': os.path.join(workdir, cfg.name + '_{0}.cert.aig'.format(x)),
                     'model': avy_pp_name if cfg.avy_based() else rfv_pp_name}
             if opt.verbose: cfg.verbose(1)
             cfg.set_witness_output(engines[x]['cex'], engines[x]['cert'])
