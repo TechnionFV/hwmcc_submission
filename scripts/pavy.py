@@ -7,11 +7,10 @@ import atexit
 import tempfile
 import shutil
 import subprocess as sub
-import threading
 import signal
-import time
 import resource
-import itertools
+from concurrent.futures import ThreadPoolExecutor
+from typing import Tuple
 
 import aig
 
@@ -473,10 +472,10 @@ def getCertificateProcessor():
     return f
 
 def getCertChecker():
-    return os.path.join(script_dir, '../certifaiger/build/check')
+    return os.path.join(script_dir, '../../certifaiger/build/check')
 
 def getCexChecker():
-    return os.path.join(script_dir, '../certifaiger/build/aiger/aigsim')
+    return os.path.join(script_dir, '../../certifaiger/build/aiger/aigsim')
 
 def execute (cmd):
     try:
@@ -554,6 +553,20 @@ def report_winner(model, code, engine, opt, workdir):
         print('[pavy] Witness: ' + (opt.certificate if code == 0 else opt.cex))
     print('unsat' if code == 0 else 'sat')
 
+def run_preprocessing_parallel(workdir: str, fname: str, *, cpu: int, verbose: bool) -> Tuple[str, bool, str]:
+    if verbose: print("[pavy] running pp")
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="preproc") as ex:
+        fut_avy = ex.submit(runAVYPreprocessing, workdir, fname, cpu=cpu, verbose=verbose)
+        fut_rfv = ex.submit(runRFVPreprocessing, workdir, fname, cpu=cpu, verbose=verbose)
+        avy_pp_name, network_has_constraints = fut_avy.result()
+        rfv_pp_name = fut_rfv.result()
+    if verbose:
+        print("[pavy] finished avy pp, output={f}".format(f=avy_pp_name))
+        print("[pavy] finished rfv pp, output={f}".format(f=rfv_pp_name))
+        sys.stdout.flush()
+    return avy_pp_name, network_has_constraints, rfv_pp_name
+
+
 def run(workdir, fname, profs, opt):
     '''Run everything and wait for an answer'''
 
@@ -562,15 +575,9 @@ def run(workdir, fname, profs, opt):
     if opt.verbose: print("[pavy] starting run with fname={f}".format(f=fname))
     sys.stdout.flush()
 
-    if opt.verbose: print("[pavy] running pp")
-
-    avy_pp_name, network_has_constraints = runAVYPreprocessing(workdir, fname, cpu=opt.pp_cpu, verbose=opt.verbose)
-    rfv_pp_name = runRFVPreprocessing(workdir, fname, cpu=opt.pp_cpu, verbose=opt.verbose)
-
-    if opt.verbose:
-        print("[pavy] finished avy pp, output={f}".format(f=avy_pp_name))
-        print("[pavy] finished rfv pp, output={f}".format(f=rfv_pp_name))
-        sys.stdout.flush()
+    avy_pp_name, network_has_constraints, rfv_pp_name = run_preprocessing_parallel(
+        workdir, fname, cpu=opt.pp_cpu, verbose=opt.verbose
+    )
 
     p = profiles()
     available_cores = list(os.sched_getaffinity(0))
