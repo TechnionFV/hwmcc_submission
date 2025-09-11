@@ -69,59 +69,47 @@ def parse(input):
 
 
 def adjust_cex(in_cex, cex_aig, orig_aig, out_cex):
-    res = next(in_cex)
-    out_cex.write (res)
-
-    prop = next(in_cex)
-    out_cex.write (prop)
-
+    out_cex.write(next(in_cex))  # result line
+    out_cex.write(next(in_cex))  # property line
     out_cex.flush()
-    # adjust if cex aig has more inputs
+
+    latch_inits = next(in_cex).strip()
+    assert len(latch_inits) == cex_aig.regSz
+
     adjust = (orig_aig.inSz < cex_aig.inSz)
-    extra_inputs = cex_aig.inSz - orig_aig.inSz
+    first_inputs = next(in_cex).strip()           # usual AIGER CEX layout
+    has_inputs0  = (len(first_inputs) == cex_aig.inSz)
 
-    # eat old initial state. We will re-build it using latches in the
-    # original ntk
-    init = next(in_cex)
-    # all cex_aig latches are initialized
-    assert (len (init.strip ()) == cex_aig.regSz)
+    # Extra-input bits (only if adjusting)
+    extra_bits = first_inputs[orig_aig.inSz:] if (adjust and has_inputs0) else ""
+    dc_iter = iter(extra_bits)
 
-    if adjust:
-        # the initial value of the extra inputs is the initial value
-        # of the latches
-        init = next (in_cex).strip ()
-        # additional inputs are the initial values of the dc latches
-        dc = (init[orig_aig.inSz:])
-    orig = iter(init[0:orig_aig.inSz])
-
-    j = 0
-
-    for i in range (0, orig_aig.regSz):
-        v = orig_aig.init [i]
+    # Rebuild initial latch vector for original design
+    buf = []
+    for i in range(orig_aig.regSz):
+        v = orig_aig.init[i]
         if v == 2:
-            assert (adjust)
-            v = dc[j]
-            j += 1
-        out_cex.write (str (v))
-    out_cex.write ('\n')
+            # prefer extra bits if available; else pick a deterministic default
+            v = int(next(dc_iter, "0"))
+        buf.append(str(v))
+    out_cex.write("".join(buf) + "\n")
 
-    if adjust:
-        out_cex.write(init[0:orig_aig.inSz])
-        out_cex.write('\n')
+    # Forward first inputs line (trimmed) if present
+    if has_inputs0:
+        out_cex.write(first_inputs[:orig_aig.inSz] + "\n")
 
+    # Forward the rest, trimming extra inputs when needed
     for line in in_cex:
-        if not adjust or len(line.strip()) != cex_aig.inSz:
-            out_cex.write(line)
-        else:
-            # remove extra inputs
-            out_cex.write(line[0:orig_aig.inSz])
-            out_cex.write('\n')
-
-        if line.strip() == '.':
+        s = line.strip()
+        if s == '.':
+            out_cex.write('.\n')
             break
+        if adjust and len(s) == cex_aig.inSz:
+            out_cex.write(s[:orig_aig.inSz] + "\n")
+        else:
+            out_cex.write(line)
 
     out_cex.flush()
-
 
 if __name__ == '__main__':
     import sys
